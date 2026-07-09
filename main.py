@@ -8,10 +8,9 @@ import gcsfs
 import asyncio 
 from azure.storage.blob.aio import BlobServiceClient 
 import aioboto3 
-from gcp_module import extract_gcp_data 
-from azure_module import extract_azure_data 
-from aws_module import extract_aws_data 
 from pydantic import BaseModel, Field
+import os
+from io import BytesIO
 
 app = FastAPI(title="ETL API", version="1.0")
 
@@ -104,7 +103,12 @@ async def extract_csv_validated(file: UploadFile = File(...)):
 @app.get("/extract-gcp") 
 async def extract_data_from_gcp(): 
     # Connect to GCS (ensure your GCP credentials are available) 
-    fs = gcsfs.GCSFileSystem(project="upgrad-project") 
+    fs = gcsfs.GCSFileSystem(
+    token=r"gcp.json"
+    )
+
+    print(fs.ls("upgrad-etl-bucket"))
+    #fs = gcsfs.GCSFileSystem( project="upgrad-project-501417") 
     def load_csv():
         with fs.open("upgrad-etl-bucket/sample.csv", "rb") as f: 
             return pd.read_csv(f)
@@ -112,66 +116,69 @@ async def extract_data_from_gcp():
  
     return { 
         "message": "File extracted successfully", 
-        "size": len(content),
         "columns":list(df.columns),
         "preview" :df.head().to_dict(orient="records")
     } 
 
-# Create async blob client 
-blob_service_client = BlobServiceClient.from_connection_string("your-azure-conn-string") 
+# # Create async blob client 
+# blob_service_client = BlobServiceClient.from_connection_string("your-azure-conn-string") 
  
-@app.get("/extract-from-azure") 
-async def extract_from_azure(): 
-    # 1. Connect to container + blob 
-    container_client = blob_service_client.get_container_client("your-container-name") 
-    blob_client = container_client.get_blob_client("your-blob-name.csv") 
+# @app.get("/extract-from-azure") 
+# async def extract_from_azure(): 
+#     # 1. Connect to container + blob 
+#     container_client = blob_service_client.get_container_client("your-container-name") 
+#     blob_client = container_client.get_blob_client("your-blob-name.csv") 
  
-    # 2. Download blob asynchronously 
-    stream = await blob_client.download_blob() 
-    content = await stream.readall() 
+#     # 2. Download blob asynchronously 
+#     stream = await blob_client.download_blob() 
+#     content = await stream.readall() 
  
-    # 3. Simulate async ETL work 
-    await asyncio.sleep(1) 
+#     # 3. Simulate async ETL work 
+#     await asyncio.sleep(1) 
  
-    # 4. Return response 
-    return { 
-        "message": "Azure blob extracted successfully", 
-        "size": len(content) 
-    }
+#     # 4. Return response 
+#     return { 
+#         "message": "Azure blob extracted successfully", 
+#         "size": len(content) 
+#     }
 
 @app.get("/extract-s3") 
-async def extract_from_s3(): 
+async def extract_from_s3():
     session = aioboto3.Session() 
  
     # Create async S3 client 
-    async with session.client("s3") as s3_client: 
+    async with session.client("s3",region_name="ap-south-1") as s3_client: 
         # Download file asynchronously 
         response = await s3_client.get_object( 
-            Bucket="your-bucket", 
-            Key="your-file.csv" 
+             Bucket="upgrad-etl-s3-bucket", 
+             Key="sample.csv" 
         ) 
         content = await response["Body"].read() 
- 
+         # Read CSV into a DataFrame
+        df = pd.read_csv(BytesIO(content))
         # Simulate ETL processing 
         await asyncio.sleep(1) 
  
-    return { 
-        "message": "File extracted from S3", 
-        "size_in_bytes": len(content) 
-    }
+        return { 
+           "message": "File extracted from S3",
+            "size_in_bytes": len(content),
+            "rows": len(df),
+            "columns": list(df.columns),
+            "data": df.to_dict(orient="records")
+        }
   
-@app.get("/run-all") 
-async def run_all_extractors(): 
-    results = await asyncio.gather( 
-        extract_gcp_data(), 
-        extract_azure_data(), 
-        extract_aws_data() 
-    ) 
-    return { 
-        "GCP": results[0], 
-        "Azure": results[1], 
-        "AWS": results[2] 
-    } 
+# @app.get("/run-all") 
+# async def run_all_extractors(): 
+#     results = await asyncio.gather( 
+#         extract_gcp_data(), 
+#         extract_azure_data(), 
+#         extract_aws_data() 
+#     ) 
+#     return { 
+#         "GCP": results[0], 
+#         "Azure": results[1], 
+#         "AWS": results[2] 
+#     } 
 # -------------------------
 # Transform API
 # -------------------------
